@@ -424,6 +424,7 @@ const OrdersManagement = () => {
             const cols = colorsFor(wfRow.length);
             return (
               <div key={o.id} className="grid grid-cols-12 p-3 items-center hover:bg-gray-50 cursor-pointer" onClick={() => openWorkflow(o)}>
+                <div className="col-span-1" />
                 <div className="col-span-3 lowercase first-letter:uppercase">{o.customer_name || 'cliente'}</div>
                 <div className="col-span-2 text-sm text-gray-600">{o.created_at ? new Date(o.created_at).toLocaleDateString() : ''}</div>
                 <div className="col-span-1 font-semibold">${Number(o.total || 0).toFixed(0)}</div>
@@ -457,7 +458,10 @@ const OrdersManagement = () => {
                 <div className="text-lg font-medium">{viewing.customer_name || 'Cliente'} — Orden #{viewing.id}</div>
                 <div className="text-xs text-gray-500">Fecha: {viewing.created_at ? new Date(viewing.created_at).toLocaleString() : '-'}</div>
               </div>
-              <button onClick={()=> setViewing(null)} className="text-gray-500 hover:text-gray-900">✕</button>
+              <div className="flex items-center gap-2">
+                <button onClick={saveWorkflow} disabled={savingWf} className="px-3 py-2 bg-black text-white rounded-none disabled:opacity-60">{savingWf ? 'Guardando...' : 'Guardar cambios'}</button>
+                <button onClick={()=> setViewing(null)} className="text-gray-500 hover:text-gray-900">✕</button>
+              </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-0">
               <div className="md:col-span-1 border-r p-4 max-h-[70vh] overflow-auto">
