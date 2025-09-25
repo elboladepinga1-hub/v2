@@ -183,7 +183,7 @@ const OrdersManagement = () => {
 
   const normalize = (s: string) => s.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim();
 
-  const getDisplayItems = (o: OrderItem) => {
+  function getDisplayItems(o: OrderItem) {
     if (!o) return o.items || [];
     let c = o.contractId ? contractsMap[o.contractId] : null;
     if (!c && o.customer_email) {
@@ -195,7 +195,7 @@ const OrdersManagement = () => {
       return (o.items || []).filter(it => names.has(normalize(String(it.name || it.product_id || it.productId || ''))));
     }
     return o.items || [];
-  };
+  }
 
   const ensureDeliveryTasks = (base: WorkflowCategory[], productNames: string[]) => {
     const cloned = JSON.parse(JSON.stringify(base)) as WorkflowCategory[];
