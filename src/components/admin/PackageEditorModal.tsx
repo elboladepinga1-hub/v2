@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { X, Plus, Trash2 } from 'lucide-react';
 import { DBPackage, updatePackage } from '../../utils/packagesService';
+import { storage } from '../../utils/firebaseClient';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 interface PackageEditorModalProps {
   open: boolean;
@@ -23,6 +25,8 @@ const PackageEditorModal: React.FC<PackageEditorModalProps> = ({ open, onClose, 
   const [selectedSection, setSelectedSection] = useState<string | undefined>('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!pkg) return;
@@ -38,6 +42,24 @@ const PackageEditorModal: React.FC<PackageEditorModalProps> = ({ open, onClose, 
     setSections(s);
     setSelectedSection(s[0] || '');
   }, [pkg]);
+
+  const handleUploadFile = async (file: File) => {
+    if (!pkg) return;
+    try {
+      setUploading(true);
+      setUploadError(null);
+      const key = `packages/${pkg.id}/${Date.now()}-${file.name}`;
+      const storageRef = ref(storage, key);
+      await uploadBytes(storageRef, file);
+      const url = await getDownloadURL(storageRef);
+      setImageUrl(url);
+      alert('Imagem enviada e URL atualizada.');
+    } catch (e: any) {
+      setUploadError(e?.message || 'Falha ao enviar imagem');
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const handleSave = async () => {
     if (!pkg) return;
@@ -115,6 +137,26 @@ const PackageEditorModal: React.FC<PackageEditorModalProps> = ({ open, onClose, 
           <div>
             <label className="block text-sm text-gray-700 mb-1">Imagem (URL)</label>
             <input value={imageUrl} onChange={e => setImageUrl(e.target.value)} className="w-full px-3 py-2 border rounded" />
+            <div className="mt-3">
+              <div className="text-sm text-gray-700 mb-1">Ou envie uma imagem</div>
+              <div className="flex items-center gap-3">
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUploadFile(f); }}
+                  disabled={uploading}
+                />
+                {uploading && <span className="text-sm text-gray-500">Enviando...</span>}
+              </div>
+              {uploadError && (
+                <div className="mt-2 p-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded">{uploadError}</div>
+              )}
+              {imageUrl && (
+                <div className="mt-3">
+                  <img src={imageUrl} alt="Prévia da imagem" className="h-24 w-24 object-cover rounded" />
+                </div>
+              )}
+            </div>
           </div>
 
           <div>
@@ -164,7 +206,7 @@ const PackageEditorModal: React.FC<PackageEditorModalProps> = ({ open, onClose, 
 
         <div className="border-t p-4 flex justify-end gap-2">
           <button onClick={onClose} className="px-4 py-2 rounded border">Cancelar</button>
-          <button onClick={handleSave} disabled={saving} className="px-4 py-2 rounded bg-primary text-white disabled:opacity-50">
+          <button onClick={handleSave} disabled={saving || uploading} className="px-4 py-2 rounded bg-primary text-white disabled:opacity-50">
             {saving ? 'Salvando...' : 'Salvar'}
           </button>
         </div>
