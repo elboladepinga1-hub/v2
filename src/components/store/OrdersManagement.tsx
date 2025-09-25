@@ -278,42 +278,51 @@ const OrdersManagement = () => {
     if (!viewing || !workflow) return;
     setSavingWf(true);
     try {
-      await updateDoc(doc(db, 'orders', viewing.id), { workflow } as any);
+      const isVirtual = String(viewing.id || '').startsWith('contract-');
+      if (isVirtual) {
+        const contractId = viewing.contractId || String(viewing.id || '').replace(/^contract-/, '');
+        if (contractId) {
+          const cRef = doc(db, 'contracts', contractId);
+          await updateDoc(cRef, { workflow } as any);
+          setContractsMap(prev => ({ ...prev, [contractId]: { ...(prev[contractId] || {}), workflow } }));
+        }
+      } else {
+        await updateDoc(doc(db, 'orders', viewing.id), { workflow } as any);
+        setOrders(prev => prev.map(x => x.id === viewing.id ? { ...x, workflow } : x));
+        setViewing(v => v ? { ...v, workflow } : v);
 
-      // Try to sync to contract: prefer explicit contractId, otherwise match by customer_email
-      let targetContractId = viewing.contractId || null;
-      let targetRef: any = null;
-      if (!targetContractId && viewing.customer_email) {
-        const key = String(viewing.customer_email).toLowerCase().trim();
-        const matched = contractsByEmail[key] || Object.values(contractsMap).find((x: any) => String((x.clientEmail || x.client_email || '')).toLowerCase().trim() === key) || null;
-        if (matched) targetContractId = matched.id;
-      }
-      if (targetContractId) {
-        const cRef = doc(db, 'contracts', targetContractId);
-        const cSnap = await getDoc(cRef);
-        if (cSnap.exists()) {
-          const contract = { id: cSnap.id, ...(cSnap.data() as any) } as any;
-          const base = (contract.workflow && contract.workflow.length) ? contract.workflow : [];
-          const items = getDisplayItems(viewing);
-          const names = items.map(it => String(it.name || it.product_id || it.productId || ''));
-          const merged = ensureDeliveryTasks(base, names);
-          const ordDeliveryCat = (workflow as WorkflowCategory[]).find(c => normalize(c.name).includes('entrega'));
-          if (ordDeliveryCat) {
-            merged.forEach(cat => {
-              if (normalize(cat.name).includes('entrega')) {
-                cat.tasks = cat.tasks.map(t => {
-                  const match = ordDeliveryCat.tasks.find(ot => normalize(ot.title) === normalize(t.title));
-                  return match ? { ...t, done: !!match.done } : t;
-                });
-              }
-            });
+        // Try to sync to contract: prefer explicit contractId, otherwise match by customer_email
+        let targetContractId = viewing.contractId || null;
+        if (!targetContractId && viewing.customer_email) {
+          const key = String(viewing.customer_email).toLowerCase().trim();
+          const matched = contractsByEmail[key] || Object.values(contractsMap).find((x: any) => String((x.clientEmail || x.client_email || '')).toLowerCase().trim() === key) || null;
+          if (matched) targetContractId = matched.id;
+        }
+        if (targetContractId) {
+          const cRef = doc(db, 'contracts', targetContractId);
+          const cSnap = await getDoc(cRef);
+          if (cSnap.exists()) {
+            const contract = { id: cSnap.id, ...(cSnap.data() as any) } as any;
+            const base = (contract.workflow && contract.workflow.length) ? contract.workflow : [];
+            const items = getDisplayItems(viewing);
+            const names = items.map(it => String(it.name || it.product_id || it.productId || ''));
+            const merged = ensureDeliveryTasks(base, names);
+            const ordDeliveryCat = (workflow as WorkflowCategory[]).find(c => normalize(c.name).includes('entrega'));
+            if (ordDeliveryCat) {
+              merged.forEach(cat => {
+                if (normalize(cat.name).includes('entrega')) {
+                  cat.tasks = cat.tasks.map(t => {
+                    const match = ordDeliveryCat.tasks.find(ot => normalize(ot.title) === normalize(t.title));
+                    return match ? { ...t, done: !!match.done } : t;
+                  });
+                }
+              });
+            }
+            await updateDoc(cRef, { workflow: merged } as any);
+            setContractsMap(prev => ({ ...prev, [cRef.id]: { ...(prev[cRef.id] || {}), workflow: merged } }));
           }
-          await updateDoc(cRef, { workflow: merged } as any);
-                                          setContractsMap(prev => ({ ...prev, [cRef.id]: { ...(prev[cRef.id] || {}), workflow: merged } }));
         }
       }
-
-      await fetchOrders();
     } finally {
       setSavingWf(false);
     }
