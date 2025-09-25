@@ -181,7 +181,7 @@ const OrdersManagement = () => {
     await fetchOrders();
   };
 
-  const normalize = (s: string) => s.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim();
+  function normalize(s: string) { return s.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim(); }
 
   function getDisplayItems(o: OrderItem) {
     if (!o) return o.items || [];
