@@ -155,7 +155,8 @@ const OrdersManagement = () => {
 
   const filtered = useMemo(() => {
     return orders.filter(o => {
-      const byStatus = statusFilter === 'todas' ? true : (o.status === statusFilter);
+      const status = getDerivedStatusForOrder(o);
+      const byStatus = statusFilter === 'todas' ? true : (status === statusFilter);
       const s = search.trim().toLowerCase();
       const bySearch = s ? ((o.customer_name || '').toLowerCase().includes(s) || (o.customer_email || '').toLowerCase().includes(s)) : true;
       const hasStoreServices = (getDisplayItems(o) || []).length > 0;
@@ -163,12 +164,15 @@ const OrdersManagement = () => {
     });
   }, [orders, statusFilter, search, contractsMap, contractsByEmail]);
 
-  const counts = useMemo(() => ({
-    todas: orders.length,
-    pendiente: orders.filter(o => o.status === 'pendiente').length,
-    procesando: orders.filter(o => o.status === 'procesando').length,
-    completado: orders.filter(o => o.status === 'completado').length,
-  }), [orders]);
+  const counts = useMemo(() => {
+    const statuses = orders.map(o => getDerivedStatusForOrder(o));
+    return {
+      todas: orders.length,
+      pendiente: statuses.filter(s => s === 'pendiente').length,
+      procesando: statuses.filter(s => s === 'procesando').length,
+      completado: statuses.filter(s => s === 'completado').length,
+    };
+  }, [orders, contractsMap]);
 
   const updateStatus = async (id: string, status: OrderStatus) => {
     await updateDoc(doc(db, 'orders', id), { status });
@@ -195,6 +199,52 @@ const OrdersManagement = () => {
       return (o.items || []).filter(it => names.has(normalize(String(it.name || it.product_id || it.productId || ''))));
     }
     return o.items || [];
+  }
+
+  function getContractForOrder(o: OrderItem) {
+    let c = o.contractId ? contractsMap[o.contractId] : null;
+    if (!c && o.customer_email) {
+      const key = String(o.customer_email).toLowerCase().trim();
+      c = contractsByEmail[key] || Object.values(contractsMap).find((x: any) => String((x.clientEmail || x.client_email || '')).toLowerCase().trim() === key) || null;
+    }
+    return c;
+  }
+
+  function getWorkflowForRow(o: OrderItem): WorkflowCategory[] {
+    if (o.workflow && o.workflow.length) return o.workflow as WorkflowCategory[];
+    const c = getContractForOrder(o);
+    return (c && Array.isArray(c.workflow)) ? (c.workflow as WorkflowCategory[]) : [];
+  }
+
+  function isDeliveryCompleteForOrder(o: OrderItem): boolean {
+    const items = getDisplayItems(o);
+    if (!items || items.length === 0) return false;
+    const wf = getWorkflowForRow(o);
+    const deliveryCat = wf.find(c => normalize(c.name).includes('entrega'));
+    if (!deliveryCat || !deliveryCat.tasks || deliveryCat.tasks.length === 0) return false;
+    const doneSet = new Set(
+      deliveryCat.tasks.filter(t => t.done).map(t => normalize(t.title))
+    );
+    const productNames = items.map(it => String(it.name || it.product_id || it.productId || ''));
+    return productNames.every(n => doneSet.has(normalize(`entregar ${n}`)));
+  }
+
+  function getDerivedStatusForOrder(o: OrderItem): OrderStatus {
+    if (isDeliveryCompleteForOrder(o)) return 'completado';
+    const wf = getWorkflowForRow(o);
+    const hasAnyTasks = wf.some(c => (c.tasks || []).length > 0);
+    const hasAnyDone = wf.some(c => (c.tasks || []).some(t => t.done));
+    if (hasAnyDone) return 'procesando';
+    if (hasAnyTasks) return 'pendiente';
+    return 'pendiente';
+  }
+
+  function getDueDateString(o: OrderItem): string {
+    if (!o.created_at) return '-';
+    const d = new Date(o.created_at);
+    if (isNaN(d.getTime())) return '-';
+    const due = new Date(d.getTime() + 15 * 24 * 60 * 60 * 1000);
+    return due.toLocaleDateString();
   }
 
   const ensureDeliveryTasks = (base: WorkflowCategory[], productNames: string[]) => {
@@ -259,6 +309,7 @@ const OrdersManagement = () => {
             });
           }
           await updateDoc(cRef, { workflow: merged } as any);
+                                          setContractsMap(prev => ({ ...prev, [cRef.id]: { ...(prev[cRef.id] || {}), workflow: merged } }));
         }
       }
 
@@ -357,35 +408,40 @@ const OrdersManagement = () => {
           <div className="col-span-2">Fecha</div>
           <div className="col-span-1">Total</div>
           <div className="col-span-3">Progreso del flujo</div>
-          <div className="col-span-2 text-right">Acciones</div>
+          <div className="col-span-2 text-right">Entregar antes de</div>
         </div>
         {loading && <div className="p-4 text-sm text-gray-500">Cargando...</div>}
         {!loading && filtered.length === 0 && <div className="p-4 text-sm text-gray-500">Sin resultados</div>}
         <div className="divide-y">
           {filtered.map(o => {
-            const wf = (o.workflow && o.workflow.length) ? o.workflow : [];
-            const segments = wf.map(cat => {
+            const wfRow = getWorkflowForRow(o);
+            const deliveryComplete = isDeliveryCompleteForOrder(o);
+            const segments = wfRow.map(cat => {
               const total = cat.tasks.length || 1;
               const done = cat.tasks.filter(t => t.done).length;
               return total === 0 ? 0 : Math.round((done/total)*100);
             });
-            const cols = colorsFor(wf.length);
+            const cols = colorsFor(wfRow.length);
             return (
               <div key={o.id} className="grid grid-cols-12 p-3 items-center hover:bg-gray-50 cursor-pointer" onClick={() => openWorkflow(o)}>
-                    <div className="col-span-3 lowercase first-letter:uppercase">{o.customer_name || 'cliente'}</div>
+                <div className="col-span-3 lowercase first-letter:uppercase">{o.customer_name || 'cliente'}</div>
                 <div className="col-span-2 text-sm text-gray-600">{o.created_at ? new Date(o.created_at).toLocaleDateString() : ''}</div>
                 <div className="col-span-1 font-semibold">${Number(o.total || 0).toFixed(0)}</div>
                 <div className="col-span-3">
-                  <div className="w-full h-3 rounded bg-gray-200 overflow-hidden flex">
-                    {segments.map((p, i) => (
-                      <div key={i} className="relative flex-1 bg-gray-200">
-                        <div className="absolute inset-y-0 left-0" style={{ width: `${p}%`, backgroundColor: cols[i] }} />
-                      </div>
-                    ))}
+                  <div className="w-full h-3 rounded overflow-hidden flex" style={{ backgroundColor: deliveryComplete ? '#16a34a' : '#e5e7eb' }}>
+                    {deliveryComplete ? (
+                      <div className="h-3 w-full" />
+                    ) : (
+                      segments.map((p, i) => (
+                        <div key={i} className="relative flex-1 bg-gray-200">
+                          <div className="absolute inset-y-0 left-0" style={{ width: `${p}%`, backgroundColor: cols[i] }} />
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
                 <div className="col-span-2 text-right">
-                  {/* Row opens modal on click; actions removed */}
+                  <span className="text-sm text-gray-700">{getDueDateString(o)}</span>
                 </div>
               </div>
             );
@@ -463,10 +519,13 @@ const OrdersManagement = () => {
                                             });
                                           }
                                           await updateDoc(cRef, { workflow: merged } as any);
+                                          setContractsMap(prev => ({ ...prev, [cRef.id]: { ...(prev[cRef.id] || {}), workflow: merged } }));
                                         }
                                       }
                                     } else {
                                       await updateDoc(doc(db, 'orders', viewing.id), { workflow: updated } as any);
+                                      setOrders(prev => prev.map(x => x.id === viewing.id ? { ...x, workflow: updated } : x));
+                                      setViewing(v => v ? { ...v, workflow: updated } : v);
                                       let targetContractId = viewing.contractId || null;
                                       if (!targetContractId && viewing.customer_email) {
                                         const key = String(viewing.customer_email).toLowerCase().trim();
@@ -494,6 +553,7 @@ const OrdersManagement = () => {
                                             });
                                           }
                                           await updateDoc(cRef, { workflow: merged } as any);
+                                          setContractsMap(prev => ({ ...prev, [cRef.id]: { ...(prev[cRef.id] || {}), workflow: merged } }));
                                         }
                                       }
                                     }
