@@ -1,0 +1,1 @@
+const c=e=>{let r;if(typeof e=="string"){const t=e.replace(/[^0-9,.-]/g,"").replace(/\.(?=\d{3}(\D|$))/g,""),n=t.includes(",")?t.replace(/\./g,"").replace(",","."):t.replace(/\./g,""),a=parseFloat(n);r=isNaN(a)?0:a}else r=e;return new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL",minimumFractionDigits:0,maximumFractionDigits:0}).format(r)};export{c as f};
